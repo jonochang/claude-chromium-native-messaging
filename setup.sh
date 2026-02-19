@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
-# Claude Native Messaging Setup for Chromium Browsers
-# This script configures Native Messaging Host for Claude extension
+# Claude Code Native Messaging Setup for Chromium Browsers
+# This script configures Native Messaging Host for Claude Code extension
 # in alternative Chromium-based browsers.
 #
 # Usage: ./setup.sh [OPTIONS]
@@ -65,7 +65,7 @@ print_header() {
     if [[ "$QUIET" == true ]]; then return; fi
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║  Claude Native Messaging Setup for Chromium Browsers       ║${NC}"
+    echo -e "${BLUE}║  Claude Code Native Messaging Setup for Chromium Browsers  ║${NC}"
     echo -e "${BLUE}║  Version: $(get_version)                                            ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -179,36 +179,8 @@ get_app_support_base() {
 }
 
 # =============================================================================
-# Claude Path Detection
+# Claude Code Path Detection
 # =============================================================================
-
-get_claude_native_host_path() {
-    if [[ "$OS" == "macos" ]]; then
-        local path="/Applications/Claude.app/Contents/Helpers/chrome-native-host"
-        if [[ -f "$path" ]]; then
-            echo "$path"
-            return 0
-        fi
-    elif [[ "$OS" == "linux" ]]; then
-        # Check multiple possible installation locations
-        local paths=(
-            "/opt/Claude/chrome-native-host"
-            "/usr/lib/claude/chrome-native-host"
-            "$HOME/.local/share/Claude/chrome-native-host"
-            # Snap packages
-            "/snap/claude/current/chrome-native-host"
-            # Flatpak
-            "$HOME/.var/app/ai.anthropic.claude/chrome-native-host"
-        )
-        for path in "${paths[@]}"; do
-            if [[ -f "$path" ]]; then
-                echo "$path"
-                return 0
-            fi
-        done
-    fi
-    echo ""
-}
 
 get_claude_code_native_host_path() {
     echo "$HOME/.claude/chrome/chrome-native-host"
@@ -393,16 +365,14 @@ create_backup() {
 
 create_manifests() {
     local browser_path="$1"
-    local native_host_path="$2"
-    local code_native_host_path="$3"
+    local code_native_host_path="$2"
 
     local nmh_dir="$browser_path/NativeMessagingHosts"
-    local desktop_manifest="$nmh_dir/com.anthropic.claude_browser_extension.json"
     local code_manifest="$nmh_dir/com.anthropic.claude_code_browser_extension.json"
 
     # Check for existing files and prompt for overwrite
-    if [[ -f "$desktop_manifest" ]] && [[ "$BACKUP" == false ]] && [[ "$DRY_RUN" == false ]]; then
-        print_warning "Manifest already exists: $desktop_manifest"
+    if [[ -f "$code_manifest" ]] && [[ "$BACKUP" == false ]] && [[ "$DRY_RUN" == false ]]; then
+        print_warning "Manifest already exists: $code_manifest"
         read -p "Overwrite? [y/N] " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -413,42 +383,12 @@ create_manifests() {
 
     # Create backups if requested
     if [[ "$BACKUP" == true ]]; then
-        create_backup "$desktop_manifest"
         create_backup "$code_manifest"
     fi
 
-    # Build allowed_origins array as JSON
-    local origins_json=""
-    for origin in "${CLAUDE_EXTENSION_ORIGINS[@]}"; do
-        if [[ -n "$origins_json" ]]; then
-            origins_json="$origins_json,"
-        fi
-        origins_json="$origins_json
-    \"$origin\""
-    done
-
-    # Prepare desktop manifest content
-    local desktop_content
-    desktop_content=$(cat << EOF
-{
-  "name": "com.anthropic.claude_browser_extension",
-  "description": "Claude Browser Extension Native Host",
-  "path": "$native_host_path",
-  "type": "stdio",
-  "allowed_origins": [$origins_json
-  ]
-}
-EOF
-)
-
     if [[ "$DRY_RUN" == true ]]; then
         print_dry_run "Would create directory: $nmh_dir"
-        print_dry_run "Would create file: $desktop_manifest"
-        print_verbose "Content:\n$desktop_content"
-
-        if [[ -f "$code_native_host_path" ]]; then
-            print_dry_run "Would create file: $code_manifest"
-        fi
+        print_dry_run "Would create file: $code_manifest"
         return 0
     fi
 
@@ -466,23 +406,8 @@ EOF
     }
     trap "rm -f '$temp_file'" RETURN
 
-    # Write desktop manifest
-    echo "$desktop_content" > "$temp_file"
-    if ! mv "$temp_file" "$desktop_manifest"; then
-        print_error "Failed to create manifest: $desktop_manifest"
-        return 1
-    fi
-    chmod 644 "$desktop_manifest"
-
-    # Create Claude Code manifest (only if Claude Code native host exists)
-    local code_created=false
-    if [[ -f "$code_native_host_path" ]]; then
-        temp_file=$(mktemp) || {
-            print_error "Failed to create temp file"
-            return 1
-        }
-
-        cat > "$temp_file" << EOF
+    # Create Claude Code manifest
+    cat > "$temp_file" << EOF
 {
   "name": "com.anthropic.claude_code_browser_extension",
   "description": "Claude Code Browser Extension Native Host",
@@ -494,18 +419,12 @@ EOF
 }
 EOF
 
-        if mv "$temp_file" "$code_manifest"; then
-            chmod 644 "$code_manifest"
-            code_created=true
-        else
-            print_error "Failed to create manifest: $code_manifest"
-        fi
-    fi
-
-    if [[ "$code_created" == true ]]; then
+    if mv "$temp_file" "$code_manifest"; then
+        chmod 644 "$code_manifest"
         return 0
     else
-        return 2  # Partial success (desktop only)
+        print_error "Failed to create manifest: $code_manifest"
+        return 1
     fi
 }
 
@@ -516,21 +435,11 @@ EOF
 uninstall() {
     local browser_path="$1"
     local nmh_dir="$browser_path/NativeMessagingHosts"
-    local desktop_manifest="$nmh_dir/com.anthropic.claude_browser_extension.json"
     local code_manifest="$nmh_dir/com.anthropic.claude_code_browser_extension.json"
 
     if [[ "$DRY_RUN" == true ]]; then
-        [[ -f "$desktop_manifest" ]] && print_dry_run "Would remove: $desktop_manifest"
         [[ -f "$code_manifest" ]] && print_dry_run "Would remove: $code_manifest"
         return 0
-    fi
-
-    if [[ -f "$desktop_manifest" ]]; then
-        if [[ "$BACKUP" == true ]]; then
-            create_backup "$desktop_manifest"
-        fi
-        rm "$desktop_manifest"
-        print_success "Removed claude_browser_extension manifest"
     fi
 
     if [[ -f "$code_manifest" ]]; then
@@ -561,27 +470,19 @@ uninstall() {
 verify_installation() {
     local browser_path="$1"
     local nmh_dir="$browser_path/NativeMessagingHosts"
-    local success=true
 
     if [[ "$DRY_RUN" == true ]]; then
         print_dry_run "Would verify installation in: $nmh_dir"
         return 0
     fi
 
-    if [[ -f "$nmh_dir/com.anthropic.claude_browser_extension.json" ]]; then
-        print_success "Claude Desktop manifest exists"
-    else
-        print_error "Claude Desktop manifest missing"
-        success=false
-    fi
-
     if [[ -f "$nmh_dir/com.anthropic.claude_code_browser_extension.json" ]]; then
         print_success "Claude Code manifest exists"
+        return 0
     else
-        print_warning "Claude Code manifest missing (Claude Code may not be installed)"
+        print_error "Claude Code manifest missing"
+        return 1
     fi
-
-    $success
 }
 
 # =============================================================================
@@ -590,13 +491,13 @@ verify_installation() {
 
 show_help() {
     cat << EOF
-Claude Native Messaging Setup for Chromium Browsers
+Claude Code Native Messaging Setup for Chromium Browsers
 
 USAGE:
     $SCRIPT_NAME [OPTIONS]
 
 OPTIONS:
-    -u, --uninstall     Remove Claude native messaging configuration
+    -u, --uninstall     Remove Claude Code native messaging configuration
     -p, --path PATH     Specify custom browser Application Support path
     -n, --dry-run       Show what would be done without making changes
     -v, --verbose       Enable verbose output
@@ -631,7 +532,7 @@ EOF
 }
 
 show_version() {
-    echo "Claude Native Messaging Setup v$(get_version)"
+    echo "Claude Code Native Messaging Setup v$(get_version)"
 }
 
 # =============================================================================
@@ -713,23 +614,15 @@ main() {
         echo ""
     fi
 
-    # Check Claude native host
-    local native_host_path
-    native_host_path=$(get_claude_native_host_path)
-    if [[ -z "$native_host_path" ]]; then
-        print_error "Claude Desktop not found. Please install Claude Desktop first."
-        print_info "Download from: https://claude.ai/download"
-        exit 1
-    fi
-    print_success "Found Claude Desktop native host: $native_host_path"
-
+    # Check Claude Code native host
     local code_native_host_path
     code_native_host_path=$(get_claude_code_native_host_path)
-    if [[ -f "$code_native_host_path" ]]; then
-        print_success "Found Claude Code native host: $code_native_host_path"
-    else
-        print_warning "Claude Code native host not found (optional)"
+    if [[ ! -f "$code_native_host_path" ]]; then
+        print_error "Claude Code native host not found. Please install Claude Code first."
+        print_info "Install with: npm install -g @anthropic-ai/claude-code"
+        exit 1
     fi
+    print_success "Found Claude Code native host: $code_native_host_path"
 
     echo ""
 
@@ -751,7 +644,7 @@ main() {
             uninstall "$validated_path"
         else
             print_info "Installing to: $validated_path"
-            create_manifests "$validated_path" "$native_host_path" "$code_native_host_path"
+            create_manifests "$validated_path" "$code_native_host_path"
             echo ""
             verify_installation "$validated_path"
         fi
@@ -836,12 +729,11 @@ main() {
             print_success "Uninstalled from $name"
         else
             local result=0
-            create_manifests "$path" "$native_host_path" "$code_native_host_path" || result=$?
+            create_manifests "$path" "$code_native_host_path" || result=$?
 
             case $result in
-                0) print_success "Created all manifests for $name" ;;
+                0) print_success "Created manifest for $name" ;;
                 1) print_warning "Skipped $name" ;;
-                2) print_warning "Created Claude Desktop manifest only (Claude Code not installed)" ;;
             esac
 
             if [[ $result -ne 1 ]]; then
@@ -859,7 +751,7 @@ main() {
     echo "  1. Completely quit your browser (check Activity Monitor/Task Manager)"
     echo "  2. Restart the browser"
     echo "  3. Open the Claude extension in the side panel"
-    echo "  4. For Claude Code: Run '/chrome' in your terminal"
+    echo "  4. Run '/chrome' in your terminal"
     echo ""
 }
 
